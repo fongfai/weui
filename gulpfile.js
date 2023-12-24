@@ -1,125 +1,204 @@
+const path = require('path');
+const fs = require('fs');
+const gulp = require('gulp');
+const less = require('gulp-less');
+const header = require('gulp-header');
+const tap = require('gulp-tap');
+const nano = require('gulp-cssnano');
+const postcss = require('gulp-postcss');
+const autoprefixer = require('autoprefixer');
+const comments = require('postcss-discard-comments');
+const rename = require('gulp-rename');
+const sourcemaps = require('gulp-sourcemaps');
+const browserSync = require('browser-sync');
+const childProcess = require('child_process');
+const pkg = require('./package.json');
+const convertCssVar = require('gulp-convert-css-var');
 
-var path = require('path');
-var fs = require('fs');
-var yargs = require('yargs').argv;
-var gulp = require('gulp');
-var less = require('gulp-less');
-var header = require('gulp-header');
-var tap = require('gulp-tap');
-var nano = require('gulp-cssnano');
-var postcss = require('gulp-postcss');
-var autoprefixer = require('autoprefixer');
-var rename = require('gulp-rename');
-var sourcemaps = require('gulp-sourcemaps');
-var browserSync = require('browser-sync');
-var pkg = require('./package.json');
+const yargs = require('yargs').options({
+  w: {
+    alias: 'watch',
+    type: 'boolean',
+  },
+  s: {
+    alias: 'server',
+    type: 'boolean',
+  },
+  p: {
+    alias: 'port',
+    type: 'number',
+  },
+}).argv;
 
-var option = {base: 'src'};
-var dist = __dirname + '/dist';
+const option = { base: 'src' };
+const dist = `${__dirname}/dist`;
 
-gulp.task('build:style', function (){
-    var banner = [
-        '/*!',
-        ' * WeUI v<%= pkg.version %> (<%= pkg.homepage %>)',
-        ' * Copyright <%= new Date().getFullYear() %> Tencent, Inc.',
-        ' * Licensed under the <%= pkg.license %> license',
-        ' */',
-        ''].join('\n');
-    gulp.src('src/style/weui.less', option)
-        .pipe(sourcemaps.init())
-        .pipe(less().on('error', function (e) {
-            console.error(e.message);
-            this.emit('end');
-        }))
-        .pipe(postcss([autoprefixer]))
-        .pipe(header(banner, { pkg : pkg } ))
-        .pipe(sourcemaps.write())
-        .pipe(gulp.dest(dist))
-        .pipe(browserSync.reload({stream: true}))
-        .pipe(nano({
-            zindex: false
-        }))
-        .pipe(rename(function (path) {
-            path.basename += '.min';
-        }))
-        .pipe(gulp.dest(dist));
-});
-
-gulp.task('build:example:assets', function (){
-    gulp.src('src/example/**/*.?(png|jpg|gif|js)', option)
-        .pipe(gulp.dest(dist))
-        .pipe(browserSync.reload({stream: true}));
-});
-
-gulp.task('build:example:style', function (){
-    gulp.src('src/example/example.less', option)
-        .pipe(less().on('error', function (e){
-            console.error(e.message);
-            this.emit('end');
-        }))
-        .pipe(postcss([autoprefixer]))
-        .pipe(nano({
-            zindex: false
-        }))
-        .pipe(gulp.dest(dist))
-        .pipe(browserSync.reload({stream: true}));
-});
-
-gulp.task('build:example:html', function (){
-    gulp.src('src/example/index.html', option)
-        .pipe(tap(function (file){
-            var dir = path.dirname(file.path);
-            var contents = file.contents.toString();
-            contents = contents.replace(/<link\s+rel="import"\s+href="(.*)">/gi, function (match, $1){
-                var filename = path.join(dir, $1);
-                var id = path.basename(filename, '.html');
-                var content = fs.readFileSync(filename, 'utf-8');
-                return '<script type="text/html" id="tpl_'+ id +'">\n'+ content +'\n</script>';
-            });
-            file.contents = new Buffer(contents);
-        }))
-        .pipe(gulp.dest(dist))
-        .pipe(browserSync.reload({stream: true}));
-});
-
-gulp.task('build:example', ['build:example:assets', 'build:example:style', 'build:example:html']);
-
-gulp.task('release', ['build:style', 'build:example']);
-
-gulp.task('watch', ['release'], function () {
-    gulp.watch('src/style/**/*', ['build:style']);
-    gulp.watch('src/example/example.less', ['build:example:style']);
-    gulp.watch('src/example/**/*.?(png|jpg|gif|js)', ['build:example:assets']);
-    gulp.watch('src/**/*.html', ['build:example:html']);
-});
-
-gulp.task('server', function () {
-    yargs.p = yargs.p || 8080;
-    browserSync.init({
-        server: {
-            baseDir: "./dist"
-        },
-        ui: {
-            port: yargs.p + 1,
-            weinre: {
-                port: yargs.p + 2
-            }
-        },
-        port: yargs.p,
-        startPath: '/example'
+function exec(cmd) {
+  return new Promise((resolve, reject) => {
+    const process = childProcess.exec(cmd, (error) => {
+      if (error) {
+        reject(error);
+      } else {
+        resolve();
+      }
     });
-});
+    process.stdout.on('data', (data) => {
+      console.log(data);
+    });
+  });
+}
+
+function buildStyle() {
+  const banner = [
+    '/*!',
+    ' * WeUI v<%= pkg.version %> (<%= pkg.homepage %>)',
+    ' * Copyright <%= new Date().getFullYear() %> Tencent, Inc.',
+    ' * Licensed under the <%= pkg.license %> license',
+    ' */',
+    '',
+  ].join('\n');
+  return gulp
+    .src('src/style/weui.less', option)
+    .pipe(sourcemaps.init())
+    .pipe(less().on('error', function (e) {
+      console.error(e.message);
+      this.emit('end');
+    }))
+    .pipe(postcss([autoprefixer(['iOS >= 7', 'Android >= 4.1']), comments()]))
+    .pipe(convertCssVar())
+    .pipe(header(banner, { pkg }))
+    .pipe(sourcemaps.write())
+    .pipe(gulp.dest(dist))
+    .pipe(browserSync.reload({ stream: true }))
+    .pipe(nano({
+      zindex: false,
+      autoprefixer: false,
+      svgo: false,
+      minifySelectors: false,
+    }))
+    .pipe(rename((path) => {
+      path.basename += '.min';
+    }))
+    .pipe(gulp.dest(dist));
+}
+function buildExampleAssets() {
+  return gulp
+    .src('src/example/**/*.?(png|jpg|gif|js)', option)
+    .pipe(gulp.dest(dist))
+    .pipe(browserSync.reload({ stream: true }));
+}
+function buildExampleStyle() {
+  return gulp
+    .src('src/example/example.less', option)
+    .pipe(less().on('error', function (e) {
+      console.error(e.message);
+      this.emit('end');
+    }))
+    .pipe(postcss([autoprefixer(['iOS >= 7', 'Android >= 4.1'])]))
+    .pipe(nano({
+      zindex: false,
+      autoprefixer: false,
+      reduceIdents: false,
+    }))
+    .pipe(gulp.dest(dist))
+    .pipe(browserSync.reload({ stream: true }));
+}
+function buildExampleHTML() {
+  return gulp
+    .src('src/example/index.html', option)
+    .pipe(tap((file) => {
+      const dir = path.dirname(file.path);
+      let contents = file.contents.toString();
+      contents = contents.replace(
+        /<link\s+rel="import"\s+href="(.*)">/gi,
+        (match, $1) => {
+          const filename = path.join(dir, $1);
+          const id = path.basename(filename, '.html');
+          const content = fs.readFileSync(filename, 'utf-8');
+          return (
+            `<script type="text/html" id="tpl_${
+              id
+            }">\n${
+              content
+            }\n</script>`
+          );
+        },
+      );
+      file.contents = new Buffer(contents);
+    }))
+    .pipe(gulp.dest(dist))
+    .pipe(browserSync.reload({ stream: true }));
+}
+
+gulp.task('build:style', buildStyle);
+gulp.task('build:example:assets', buildExampleAssets);
+gulp.task('build:example:style', buildExampleStyle);
+gulp.task('build:example:html', buildExampleHTML);
+
+gulp.task('build:example', gulp.parallel('build:example:assets', 'build:example:style', 'build:example:html'));
+
+gulp.task('build', gulp.parallel('build:style', 'build:example'));
+
+gulp.task('tag', () => new Promise((resolve) => {
+  const tag = `v${pkg.version}`;
+  exec(`git tag ${tag}`).then(resolve);
+}));
 
 // 参数说明
 //  -w: 实时监听
 //  -s: 启动服务器
 //  -p: 服务器启动端口，默认8080
-gulp.task('default', ['release'], function () {
-    if (yargs.s) {
-        gulp.start('server');
-    }
+gulp.task('default', gulp.series('build', () => new Promise((resolve) => {
+  if (yargs.s) {
+    yargs.p = yargs.p || 8080;
+    browserSync.init({
+      server: {
+        baseDir: './dist',
+      },
+      ui: {
+        port: yargs.p + 1,
+        weinre: {
+          port: yargs.p + 2,
+        },
+      },
+      port: yargs.p,
+      startPath: '/example',
+    });
+    resolve();
+  }
 
-    if (yargs.w) {
-        gulp.start('watch');
-    }
-});
+  if (yargs.w) {
+    const list = [
+      {
+        path: 'src/style/**/*',
+        task: buildStyle,
+      },
+      {
+        path: 'src/example/**/*.?(png|jpg|gif|js)',
+        task: buildExampleAssets,
+      },
+      {
+        path: 'src/example/example.less',
+        task: buildExampleStyle,
+      },
+      {
+        path: 'src/example/**/*.html',
+        task: buildExampleHTML,
+      },
+    ];
+    list.forEach((item) => {
+      let timeout = null;
+      gulp.watch(path.resolve(__dirname, item.path)).on('change', (path) => {
+        clearTimeout(timeout);
+
+        console.log(path);
+        timeout = setTimeout(() => {
+          item.task();
+        }, 300);
+      });
+    });
+    resolve();
+  }
+
+  resolve();
+})));
